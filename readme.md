@@ -95,6 +95,7 @@ then
 
 5.  Restore: Use "Restore Backup" if needed
 
+### <span style="color: #00ffff"> A full theme reset on Glow Tool is recommended.</span>
 
 ## 🔧 Technical Details
 
