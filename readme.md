@@ -1,6 +1,6 @@
 # 🎨 Glow Engine Colorizer Utility
 
-A Python-based GUI application for colorizing macOS themes within the `Glow Engine Project`. Extract dominant colors from your wallpaper and apply them to theme elements with customizable intensity.
+A Python-based GUI application for colorizing macOS themes within the `Glow Engine Project`.
 
 ##  <span style="color:orange">To get access to Glow Engine, join the Discord server:</span>
 ##  <span style="color:orange">https://discord.gg/QF2KEmku</span>
@@ -30,25 +30,26 @@ A Python-based GUI application for colorizing macOS themes within the `Glow Engi
 
 -   macOS (designed for macOS theming)
 
+## <span style="color:orange">🚀  Download the App on [releases page](https://github.com/JulioNectar/glow-engine-colorizer-utility/releases)</span>
 
-## 🚀 Installation & Setup
+----
 
-### 1\. Download the App or the Project
+## Devs: Installation & Setup
 
-### 2\. Create Python Virtual Environment
+### 1\. Create Python Virtual Environment
 
 \# Create virtual environment
-`python3 venv glow-env`
+`python3 -m venv glow-env`
 
 \# Activate the environment
 `source glow-env/bin/activate`
 
-### 3\. Install Dependencies
+### 2\. Install Dependencies
 
 \# Install required packages
 `pip install \-r requirements.txt`
 
-### 4\. Run the Application
+### 3\. Run the Application
 
 \# Run the colorizer
 
