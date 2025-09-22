@@ -1,14 +1,21 @@
 from pathlib import Path
-from PIL import Image
+from PIL import Image, ImageOps
 from .color_utils import hex_to_rgb, adjust_color_hsv, is_white_pixel, is_black_pixel
 
 def colorize_enhanced(file_path, color, intensity, saturation, brightness,
                       out_folder, input_dir, preserve_transparency=True,
                       preserve_whites=True, preserve_blacks=True,
                       white_threshold=245, black_threshold=30,
-                      pattern_path=None, pattern_blend=0):
-    """Enhanced colorization with all new features"""
+                      pattern_path=None, pattern_blend=0,
+                      convert_to_grayscale=False):
+    """Enhanced colorization with optional grayscale pre-processing"""
     img = Image.open(file_path).convert("RGBA")
+
+    if convert_to_grayscale:
+        # Convert to grayscale but keep alpha
+        gray = ImageOps.grayscale(img)
+        img = Image.merge("RGBA", (gray, gray, gray, img.getchannel("A")))
+
     r_col, g_col, b_col = hex_to_rgb(color)
     pixels = img.load()
 

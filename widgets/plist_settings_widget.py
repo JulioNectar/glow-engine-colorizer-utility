@@ -128,7 +128,8 @@ class PlistSettingsWidget(QWidget):
         layout.addWidget(asset_group)
 
         # Info label
-        self.info_label = QLabel("These settings will be applied to the settings.plist file in the theme folder.")
+        self.info_label = QLabel("These non-color settings will be applied to the settings.plist file. "
+                                "For color editing, use the 'Plist Colors' tab.")
         self.info_label.setWordWrap(True)
         self.info_label.setStyleSheet("color: #666; padding: 5px;")
         layout.addWidget(self.info_label)

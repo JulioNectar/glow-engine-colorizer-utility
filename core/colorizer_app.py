@@ -24,6 +24,10 @@ from utils.color_utils import hex_to_rgb
 from utils.file_utils import get_all_image_files, get_top_level_files
 
 from widgets.manual_color_adjustment_widget import ManualColorAdjustmentWidget
+import colorsys
+
+from widgets.plist_colors_widget import PlistColorsWidget
+
 
 
 SUPPORTED = ['.png', '.jpg', '.jpeg']
@@ -53,11 +57,13 @@ class ColorizerApp(QMainWindow):
     def save_config(self, theme_path, color, intensity, saturation, brightness):
         """Save current configuration"""
         try:
+            theme_mode = self.theme_mode_combo.currentText()
             self.current_config[str(theme_path)] = {
                 "color": color,
                 "intensity": intensity,
                 "saturation": saturation,
                 "brightness": brightness,
+                "theme_mode": theme_mode,
                 "timestamp": str(Path(theme_path).stat().st_mtime) if Path(theme_path).exists() else ""
             }
             with open(CONFIG_FILE, 'w') as f:
@@ -66,7 +72,7 @@ class ColorizerApp(QMainWindow):
             print(f"Error saving config: {e}")
 
     def setup_ui(self):
-        self.setWindowTitle("Glow Engine Colorizer - Enhanced")
+        self.setWindowTitle("Glow Engine Colorizer Utility")
         self.setGeometry(100, 100, 700, 800)
 
         # Central widget
@@ -87,8 +93,9 @@ class ColorizerApp(QMainWindow):
 
         # Tab 2: Manual Color Adjustment (NEW)
         manual_tab = QWidget()
-        self.setup_manual_tab(manual_tab)
-        self.tab_widget.addTab(manual_tab, "Manual Colors")
+        # self.setup_manual_tab(manual_tab)
+        # self.tab_widget.addTab(manual_tab, "Manual Colors")
+        # manual_tab.setDisabled(1)
 
         # Tab 3: Color Profiles
         profiles_tab = QWidget()
@@ -109,6 +116,11 @@ class ColorizerApp(QMainWindow):
         plist_tab = QWidget()
         self.setup_plist_tab(plist_tab)
         self.tab_widget.addTab(plist_tab, "Plist Settings")
+
+        # Tab 7: Plist Colors Editor (NEW)
+        plist_colors_tab = QWidget()
+        self.setup_plist_colors_tab(plist_colors_tab)
+        self.tab_widget.addTab(plist_colors_tab, "Plist Colors")
 
         # Progress bar (outside tabs)
         self.progress_bar = QProgressBar()
@@ -165,6 +177,17 @@ class ColorizerApp(QMainWindow):
         self.theme_info_label = QLabel("No theme selected")
         self.theme_info_label.setStyleSheet("color: #666; padding: 5px;")
         theme_layout.addWidget(self.theme_info_label)
+
+        theme_mode_layout = QHBoxLayout()
+        theme_mode_layout.addWidget(QLabel("Theme Mode:"))
+
+        self.theme_mode_combo = QComboBox()
+        self.theme_mode_combo.addItems(["Light Theme", "Dark Theme"])
+        self.theme_mode_combo.setCurrentIndex(0)  # Padrão: tema claro
+        theme_mode_layout.addWidget(self.theme_mode_combo)
+
+        theme_mode_layout.addStretch()
+        theme_layout.addLayout(theme_mode_layout)
 
         layout.addWidget(theme_group)
 
@@ -361,7 +384,7 @@ class ColorizerApp(QMainWindow):
         white_layout = QHBoxLayout()
         white_layout.addWidget(QLabel("White Threshold:"))
         self.white_threshold = QSpinBox()
-        self.white_threshold.setRange(100, 255)
+        self.white_threshold.setRange(200, 255)
         self.white_threshold.setValue(254)
         white_layout.addWidget(self.white_threshold)
         threshold_layout.addLayout(white_layout)
@@ -369,7 +392,7 @@ class ColorizerApp(QMainWindow):
         black_layout = QHBoxLayout()
         black_layout.addWidget(QLabel("Black Threshold:"))
         self.black_threshold = QSpinBox()
-        self.black_threshold.setRange(0, 200)
+        self.black_threshold.setRange(0, 100)
         self.black_threshold.setValue(30)
         black_layout.addWidget(self.black_threshold)
         threshold_layout.addLayout(black_layout)
@@ -394,17 +417,98 @@ class ColorizerApp(QMainWindow):
         self.plist_widget = PlistSettingsWidget()
         layout.addWidget(self.plist_widget)
 
+    def setup_plist_colors_tab(self, parent):
+        layout = QVBoxLayout(parent)
+
+        # Adicione um header com informações do tema
+        theme_header = QLabel("Plist Color Editor")
+        theme_header.setStyleSheet("font-size: 16px; font-weight: bold; padding: 10px;")
+        layout.addWidget(theme_header)
+
+        # Status do tema atual
+        self.plist_theme_status = QLabel("No theme selected")
+        self.plist_theme_status.setStyleSheet(
+            "color: #666; padding: 5px; background-color: #f0f0f0; border-radius: 5px;")
+        layout.addWidget(self.plist_theme_status)
+
+        # Botão para carregar automaticamente quando um tema é selecionado
+        self.auto_load_btn = QPushButton("Load Colors from Selected Theme")
+        self.auto_load_btn.clicked.connect(self.load_plist_colors_from_selected_theme)
+        layout.addWidget(self.auto_load_btn)
+
+        self.plist_colors_widget = PlistColorsWidget()
+        self.plist_colors_widget.colorsChanged.connect(self.on_plist_colors_changed)
+        layout.addWidget(self.plist_colors_widget)
+
+        # Atualizar status quando a aba for aberta
+        self.tab_widget.currentChanged.connect(self.on_tab_changed)
+
+    def load_plist_colors_from_selected_theme(self):
+        """Load plist colors from the currently selected theme"""
+        theme_path = self.get_selected_theme()
+        if not theme_path:
+            QMessageBox.warning(self, "Error", "Please select a theme first")
+            return
+
+        plist_path = theme_path / "settings.plist"
+        if not plist_path.exists():
+            QMessageBox.warning(self, "Error", f"No settings.plist found in:\n{theme_path}")
+            return
+
+        try:
+            success = self.plist_colors_widget.set_plist_path(str(plist_path))
+            if success:
+                self.plist_theme_status.setText(f"Loaded: {theme_path.name}")
+                self.plist_theme_status.setStyleSheet(
+                    "color: #28a745; padding: 5px; background-color: #f0f0f0; border-radius: 5px;")
+            else:
+                self.plist_theme_status.setText(f"Failed to load colors from: {theme_path.name}")
+                self.plist_theme_status.setStyleSheet(
+                    "color: #dc3545; padding: 5px; background-color: #f0f0f0; border-radius: 5px;")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load plist: {str(e)}")
+
+    # Adicione este método para detectar quando a aba é mudada
+    def on_tab_changed(self, index):
+        """When tab changes, update the plist colors tab status"""
+        tab_name = self.tab_widget.tabText(index)
+        if tab_name == "Plist Colors":
+            self.update_plist_colors_tab_status()
+
+    def update_plist_colors_tab_status(self):
+        """Update the status label in plist colors tab"""
+        theme_path = self.get_selected_theme()
+        if theme_path:
+            plist_path = theme_path / "settings.plist"
+            if plist_path.exists():
+                self.plist_theme_status.setText(f"Ready: {theme_path.name} (Click 'Load Colors' above)")
+                self.plist_theme_status.setStyleSheet(
+                    "color: #007bff; padding: 5px; background-color: #f0f0f0; border-radius: 5px;")
+            else:
+                self.plist_theme_status.setText(f"Warning: No settings.plist in {theme_path.name}")
+                self.plist_theme_status.setStyleSheet(
+                    "color: #ffc107; padding: 5px; background-color: #f0f0f0; border-radius: 5px;")
+        else:
+            self.plist_theme_status.setText("No theme selected - Please select a theme in Main Controls tab")
+            self.plist_theme_status.setStyleSheet(
+                "color: #dc3545; padding: 5px; background-color: #f0f0f0; border-radius: 5px;")
+
     def on_theme_changed(self, theme_name):
         """Handle theme selection change"""
         if theme_name:
             theme_path = self.get_selected_theme()
-            if str(theme_path) in self.current_config:
-                config = self.current_config[str(theme_path)]
-                self.theme_info_label.setText(
-                    f"Last used: {config['color']} at {config['intensity']:.1f} intensity"
-                )
-            else:
-                self.theme_info_label.setText("No previous configuration found")
+            if theme_path:
+                # Update main tab info
+                if str(theme_path) in self.current_config:
+                    config = self.current_config[str(theme_path)]
+                    self.theme_info_label.setText(
+                        f"Last used: {config['color']} at {config['intensity']:.1f} intensity"
+                    )
+                else:
+                    self.theme_info_label.setText("No previous configuration found")
+
+                # Update plist colors tab if it's visible
+                self.update_plist_colors_tab_status()
 
     def on_manual_color_changed(self, item_name, color):
         """Handle manual color changes for specific items"""
@@ -423,6 +527,11 @@ class ColorizerApp(QMainWindow):
             self.intensity_spin.setValue(config['intensity'])
             self.saturation_slider.setValue(int(config.get('saturation', 1.0) * 100))
             self.brightness_slider.setValue(int(config.get('brightness', 1.0) * 100))
+
+            if 'theme_mode' in config:
+                index = self.theme_mode_combo.findText(config['theme_mode'])
+                if index >= 0:
+                    self.theme_mode_combo.setCurrentIndex(index)
 
             # Reset manual colors when loading a new config
             if hasattr(self, 'manual_colors'):
@@ -525,6 +634,26 @@ class ColorizerApp(QMainWindow):
             if hasattr(self, 'manual_color_widget'):
                 self.manual_color_widget.set_base_color(color)
 
+    def on_plist_colors_changed(self, color_changes):
+        """Handle changes to plist colors"""
+        print(f"Plist colors changed: {len(color_changes)} modifications")
+        # Store the changes for later use if needed
+        self.plist_color_changes = color_changes
+
+        # # Optional: Auto-process the theme when plist colors are changed
+        # reply = QMessageBox.question(self, "Colors Updated",
+        #                              "Plist colors have been updated. Would you like to process the theme now?",
+        #                              QMessageBox.Yes | QMessageBox.No)
+        #
+        # if reply == QMessageBox.Yes:
+        #     self.process_theme()
+
+        self.process_theme()
+
+    def get_current_theme_path(self):
+        """Get the path of the currently selected theme"""
+        return self.get_selected_theme()
+
     def update_color_preview(self, color):
         self.color_preview.setStyleSheet(f"background-color: {color}; border: 1px solid #ccc;")
 
@@ -606,7 +735,7 @@ class ColorizerApp(QMainWindow):
             parent_folder = input_dir.parent
 
             if create_new:
-                sanitized_color = color.replace('#','').upper()
+                sanitized_color = color.replace('#', '').upper()
                 out_folder = parent_folder / f"{folder_name}-colorized#{sanitized_color}_{intensity:.1f}"
                 out_folder.mkdir(exist_ok=True)
 
@@ -646,20 +775,25 @@ class ColorizerApp(QMainWindow):
                     pattern_blend = self.pattern_blend_slider.value() / 100.0
 
                     # Get pattern filters from UI
-                    if hasattr(self.pattern_widget, 'apply_mica_header') and self.pattern_widget.apply_mica_header.isChecked():
+                    if hasattr(self.pattern_widget,
+                               'apply_mica_header') and self.pattern_widget.apply_mica_header.isChecked():
                         pattern_filters.append('Mica: Header')
-                    if hasattr(self.pattern_widget, 'apply_mica_sidebar') and self.pattern_widget.apply_mica_sidebar.isChecked():
+                    if hasattr(self.pattern_widget,
+                               'apply_mica_sidebar') and self.pattern_widget.apply_mica_sidebar.isChecked():
                         pattern_filters.append('Mica: Sidebar')
-                    if hasattr(self.pattern_widget, 'apply_mica_titlebar') and self.pattern_widget.apply_mica_titlebar.isChecked():
+                    if hasattr(self.pattern_widget,
+                               'apply_mica_titlebar') and self.pattern_widget.apply_mica_titlebar.isChecked():
                         pattern_filters.append('Mica: Titlebar')
-                    if hasattr(self.pattern_widget, 'apply_mica_menu') and self.pattern_widget.apply_mica_menu.isChecked():
+                    if hasattr(self.pattern_widget,
+                               'apply_mica_menu') and self.pattern_widget.apply_mica_menu.isChecked():
                         pattern_filters.append('Mica: Menu')
-                    if hasattr(self.pattern_widget, 'apply_mica_window_bg') and self.pattern_widget.apply_mica_window_bg.isChecked():
+                    if hasattr(self.pattern_widget,
+                               'apply_mica_window_bg') and self.pattern_widget.apply_mica_window_bg.isChecked():
                         pattern_filters.append('Mica: WindowBackground')
 
             # Check for color variations
             use_variations = (hasattr(self, 'color_variations_widget') and
-                             self.color_variations_widget.enable_variations.isChecked())
+                              self.color_variations_widget.enable_variations.isChecked())
 
             variations = []
             if use_variations:
@@ -668,12 +802,24 @@ class ColorizerApp(QMainWindow):
             total_files = len(files)
             for i, file in enumerate(files):
                 # Determine which color to use for this file
+                file_color = color  # Default to the main selected color
+
                 if use_variations and variations:
                     # Use different color variation for each file (cyclic)
                     variation_index = i % len(variations)
                     file_color = variations[variation_index]
-                else:
-                    file_color = color
+
+                # Check for manual color overrides
+                # The crucial change: determine final_color BEFORE calling colorize_enhanced
+                final_color_for_file = file_color
+                if hasattr(self, 'manual_colors') and file.name in self.manual_colors:
+                    final_color_for_file = self.manual_colors[file.name]
+                # Also check for relative paths used in manual_color_adjustment_widget
+                # manual_colors stores full paths like "Mica/ Header_Active_Normal_Off_Base0@2x.png"
+                # so we need to check if file.relative_to(process_folder) is in manual_colors
+                relative_file_path = file.relative_to(process_folder).as_posix()
+                if hasattr(self, 'manual_colors') and relative_file_path in self.manual_colors:
+                    final_color_for_file = self.manual_colors[relative_file_path]
 
                 # Check if pattern should be applied to this file
                 apply_pattern_to_file = False
@@ -681,36 +827,19 @@ class ColorizerApp(QMainWindow):
                     filename = file.name
                     # Check if filename matches any of the selected filters
                     for pattern_filter in pattern_filters:
-                        if filename.startswith(pattern_filter):
+                        if filename.startswith(pattern_filter.split(': ')[1]):  # Compare with just the filename part
                             apply_pattern_to_file = True
                             break
 
                 colorize_enhanced(
-                    file, file_color, intensity, saturation, brightness,
+                    file, final_color_for_file, intensity, saturation, brightness,  # Use final_color_for_file here
                     process_folder, input_dir,
                     preserve_transparency, preserve_whites, preserve_blacks,
                     white_threshold, black_threshold,
-                    pattern_path if apply_pattern_to_file else None,  # Only apply pattern if file matches filters
+                    pattern_path if apply_pattern_to_file else None,
                     pattern_blend if apply_pattern_to_file else 0
                 )
                 self.progress_bar.setValue(int((i + 1) / total_files * 100))
-
-            # Check for manual color overrides
-            manual_color = None
-            if hasattr(self, 'manual_colors') and file.name in self.manual_colors:
-                manual_color = self.manual_colors[file.name]
-
-            # Use manual color if specified, otherwise use the determined color
-            final_color = manual_color if manual_color else file_color
-
-            colorize_enhanced(
-                file, final_color, intensity, saturation, brightness,
-                process_folder, input_dir,
-                preserve_transparency, preserve_whites, preserve_blacks,
-                white_threshold, black_threshold,
-                pattern_path if apply_pattern_to_file else None,
-                pattern_blend if apply_pattern_to_file else 0
-            )
 
         except Exception as e:
             raise Exception(f"Error processing theme files: {str(e)}")
@@ -734,6 +863,22 @@ class ColorizerApp(QMainWindow):
             # Load the plist file
             with open(plist_path, 'rb') as f:
                 plist_data = plistlib.load(f)
+
+                # Determinar se é tema escuro
+            is_dark_theme = self.theme_mode_combo.currentText() == "Dark Theme"
+
+            # Ajustar a cor baseado no tema
+            if is_dark_theme:
+                # Para tema escuro, escurecer a cor
+                r, g, b = hex_to_rgb(color)
+                # Reduzir brilho (valor HSV) em 30% para tema escuro
+                h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+                r, g, b = colorsys.hsv_to_rgb(h, s, v)
+                theme_color = f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
+            else:
+                # Para tema claro, manter a cor original
+                theme_color = color
+
 
             # Get all settings from UI
             active_shadow = self.plist_widget.active_shadow_spin.value()
@@ -769,6 +914,40 @@ class ColorizerApp(QMainWindow):
             plist_data['gMiniToolbar'] = mini_toolbar
             plist_data['gPatchAppearance'] = patch_appearance
             plist_data['gControlSpacing'] = control_spacing
+
+            # Atualiza configurações básicas
+            plist_data['ActiveShadow'] = active_shadow
+            plist_data['InactiveShadow'] = inactive_shadow
+            plist_data['DockReflection'] = dock_reflection
+            plist_data['DockTouchesGround'] = dock_touches_ground
+            plist_data['DockSlices'] = dock_slices
+            plist_data['HideWindowRim'] = hide_window_rim
+            plist_data['MiniToolbar'] = mini_toolbar
+            plist_data['PatchAppearance'] = patch_appearance
+            plist_data['ControlSpacing'] = control_spacing
+
+            # Atualiza opções de Mica
+            plist_data['MicaHeader'] = mica_header
+            plist_data['MicaSidebar'] = mica_sidebar
+            plist_data['MicaTitlebar'] = mica_titlebar
+            plist_data['MicaMenu'] = mica_menu
+            plist_data['MicaWindowBackground'] = mica_window_bg
+
+            # Atualiza caminhos de assets se informados
+            if window_frame_mask_1x:
+                plist_data['WindowFrameMask1x'] = window_frame_mask_1x
+            if window_frame_base_1x:
+                plist_data['WindowFrameBase1x'] = window_frame_base_1x
+            if window_frame_mask_2x:
+                plist_data['WindowFrameMask2x'] = window_frame_mask_2x
+            if window_frame_base_2x:
+                plist_data['WindowFrameBase2x'] = window_frame_base_2x
+
+            # Adiciona metadados de última cor aplicada
+            plist_data['LastColorizedColor'] = color
+            plist_data['LastColorizedIntensity'] = intensity
+            plist_data['LastColorizedSaturation'] = saturation
+            plist_data['LastColorizedBrightness'] = brightness
 
             # Update Mica settings
             if 'gMicaTile' not in plist_data:
@@ -843,7 +1022,7 @@ class ColorizerApp(QMainWindow):
             # Update color values if gColors exists
             if 'gColors' in plist_data:
                 color_dict = plist_data['gColors']
-                r_col, g_col, b_col = hex_to_rgb(color)
+                r_col, g_col, b_col = hex_to_rgb(theme_color)
 
                 # Aplicar ajustes de saturação e brilho à cor base
                 r_col_adj, g_col_adj, b_col_adj = adjust_color_hsv(r_col, g_col, b_col, saturation, brightness)
@@ -877,6 +1056,17 @@ class ColorizerApp(QMainWindow):
                 plistlib.dump(plist_data, f)
 
             print(f"Updated settings.plist at {plist_path}")
+
+            # Apply custom color changes if any
+            if hasattr(self, 'plist_color_changes') and self.plist_color_changes:
+                for key, new_color in self.plist_color_changes.items():
+                    if key in plist_data:
+                        plist_data[key] = new_color
+                        print(f"Updated {key} to {new_color}")
+
+            # Save the modified plist
+            with open(plist_path, 'wb') as f:
+                plistlib.dump(plist_data, f)
 
         except Exception as e:
             print(f"Error processing plist file: {e}")

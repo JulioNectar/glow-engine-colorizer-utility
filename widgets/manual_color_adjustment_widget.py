@@ -155,6 +155,7 @@ class ManualColorAdjustmentWidget(QWidget):
             hex_color = color.name()
             self.color_controls[item_name].setStyleSheet(f"background-color: {hex_color}; border: 1px solid #ccc;")
             self.item_colors[item_name] = hex_color
+            print(f"Manual color set for {item_name}: {hex_color}")  # Debug print
             self.colorChanged.emit(item_name, hex_color)
 
     def reset_all_colors(self):
