@@ -1,0 +1,5 @@
+PyQt5
+Pillow
+scikit-learn
+numpy
+pyinstaller
