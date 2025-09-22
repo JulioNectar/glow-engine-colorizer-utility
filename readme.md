@@ -126,17 +126,6 @@ then
 
 This project is designed for personal use with Glow Themes on macOS.
 
-## 🤝 Support
-
-For issues or questions:
-
-1.  Check that all dependencies are installed
-
-2.  Ensure you have write permissions to `/Library/GlowThemes/`
-
-3.  Verify your wallpaper images are in supported formats
-
-
 * * *
 
 Note: This utility is designed specifically for macOS theming using Glow Engine.
