@@ -1,392 +1,33 @@
-#!/usr/bin/env python3
 import os
 import shutil
-import sys
 import json
 import plistlib
 from pathlib import Path
-from PIL import Image, ImageDraw
-import colorsys
-import math
 from collections import Counter
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+from PyQt5.QtWidgets import QColorDialog
+from utils.color_utils import hex_to_rgb, adjust_color_hsv
+from widgets.color_variations_widget import ColorVariationsWidget
+
+from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QComboBox, QSlider, QDoubleSpinBox,
                              QCheckBox, QFileDialog, QMessageBox, QGroupBox, QProgressBar,
-                             QListWidget, QStackedWidget, QLineEdit, QColorDialog, QGridLayout,
-                             QTabWidget, QSpinBox, QRadioButton, QButtonGroup, QTextEdit,
-                             QScrollArea)
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer
-from PyQt5.QtGui import QPixmap, QColor, QDragEnterEvent, QDropEvent, QPalette
-import numpy as np
+                             QListWidget, QLineEdit, QGridLayout, QTabWidget, QSpinBox)
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QColor
+
+from widgets.drag_drop_label import DragDropLabel
+from widgets.color_profile_widget import ColorProfileWidget
+from widgets.pattern_generator_widget import PatternGeneratorWidget
+from widgets.plist_settings_widget import PlistSettingsWidget
+from utils.image_processing import colorize_enhanced
+from utils.color_utils import hex_to_rgb
+from utils.file_utils import get_all_image_files, get_top_level_files
+
+from widgets.manual_color_adjustment_widget import ManualColorAdjustmentWidget
+
 
 SUPPORTED = ['.png', '.jpg', '.jpeg']
 CONFIG_FILE = 'colorizer_config.json'
-
-class ColorProfileWidget(QWidget):
-    profileSelected = pyqtSignal(dict)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.profiles = {
-            "Ocean Blue": {"color": "#0066CC", "intensity": 0.6, "saturation": 1.2, "brightness": 1.0},
-            "Forest Green": {"color": "#228B22", "intensity": 0.5, "saturation": 1.1, "brightness": 0.95},
-            "Sunset Orange": {"color": "#FF6B35", "intensity": 0.7, "saturation": 1.3, "brightness": 1.1},
-            "Royal Purple": {"color": "#663399", "intensity": 0.6, "saturation": 1.15, "brightness": 0.9},
-            "Cherry Red": {"color": "#DC143C", "intensity": 0.65, "saturation": 1.25, "brightness": 1.05},
-            "Golden Yellow": {"color": "#FFD700", "intensity": 0.55, "saturation": 1.2, "brightness": 1.15},
-            "Deep Pink": {"color": "#FF1493", "intensity": 0.6, "saturation": 1.3, "brightness": 1.0},
-            "Teal": {"color": "#008080", "intensity": 0.5, "saturation": 1.1, "brightness": 0.95},
-            "Slate Gray": {"color": "#708090", "intensity": 0.4, "saturation": 0.8, "brightness": 0.9},
-            "Coral": {"color": "#FF7F50", "intensity": 0.6, "saturation": 1.2, "brightness": 1.1}
-        }
-        self.setup_ui()
-
-    def setup_ui(self):
-        layout = QVBoxLayout(self)
-
-        # Profile selector
-        profile_layout = QHBoxLayout()
-        profile_layout.addWidget(QLabel("Select Profile:"))
-
-        self.profile_combo = QComboBox()
-        self.profile_combo.addItem("Custom")
-        for name in self.profiles.keys():
-            self.profile_combo.addItem(name)
-        self.profile_combo.currentTextChanged.connect(self.on_profile_changed)
-        profile_layout.addWidget(self.profile_combo)
-
-        self.apply_btn = QPushButton("Apply Profile")
-        self.apply_btn.clicked.connect(self.apply_profile)
-        profile_layout.addWidget(self.apply_btn)
-
-        layout.addLayout(profile_layout)
-
-        # Profile preview
-        self.preview_label = QLabel("Profile Preview")
-        self.preview_label.setMinimumHeight(40)
-        self.preview_label.setStyleSheet("border: 1px solid #ccc; padding: 5px;")
-        layout.addWidget(self.preview_label)
-
-    def on_profile_changed(self, profile_name):
-        if profile_name in self.profiles:
-            profile = self.profiles[profile_name]
-            self.preview_label.setStyleSheet(
-                f"background-color: {profile['color']}; color: white; "
-                f"border: 2px solid #333; padding: 5px; font-weight: bold;"
-            )
-            self.preview_label.setText(f"{profile_name}")
-
-    def apply_profile(self):
-        current = self.profile_combo.currentText()
-        if current in self.profiles:
-            self.profileSelected.emit(self.profiles[current])
-
-class PatternGeneratorWidget(QWidget):
-    patternGenerated = pyqtSignal(str)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setup_ui()
-
-    def setup_ui(self):
-        layout = QVBoxLayout(self)
-
-        # Pattern type selection
-        pattern_layout = QHBoxLayout()
-        pattern_layout.addWidget(QLabel("Pattern Type:"))
-
-        self.pattern_combo = QComboBox()
-        self.pattern_combo.addItems([
-            "Gradient", "Checkerboard", "Stripes", "Dots",
-            "Hexagonal", "Waves", "Noise", "Circles"
-        ])
-        pattern_layout.addWidget(self.pattern_combo)
-
-        layout.addLayout(pattern_layout)
-
-        # Pattern settings
-        settings_layout = QGridLayout()
-
-        settings_layout.addWidget(QLabel("Size:"), 0, 0)
-        self.size_spin = QSpinBox()
-        self.size_spin.setRange(10, 200)
-        self.size_spin.setValue(50)
-        settings_layout.addWidget(self.size_spin, 0, 1)
-
-        settings_layout.addWidget(QLabel("Density:"), 1, 0)
-        self.density_slider = QSlider(Qt.Horizontal)
-        self.density_slider.setRange(1, 10)
-        self.density_slider.setValue(5)
-        settings_layout.addWidget(self.density_slider, 1, 1)
-
-        layout.addLayout(settings_layout)
-
-        # Generate button
-        self.generate_btn = QPushButton("Generate Pattern")
-        self.generate_btn.clicked.connect(self.generate_pattern)
-        layout.addWidget(self.generate_btn)
-
-        # Preview
-        self.preview_label = QLabel("Pattern Preview")
-        self.preview_label.setMinimumHeight(100)
-        self.preview_label.setStyleSheet("border: 1px solid #ccc;")
-        self.preview_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.preview_label)
-
-    def generate_pattern(self):
-        pattern_type = self.pattern_combo.currentText()
-        size = self.size_spin.value()
-        density = self.density_slider.value()
-
-        # Generate pattern image
-        pattern_path = self.create_pattern_image(pattern_type, size, density)
-        if pattern_path:
-            self.patternGenerated.emit(pattern_path)
-
-            # Show preview
-            pixmap = QPixmap(pattern_path)
-            scaled_pixmap = pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.preview_label.setPixmap(scaled_pixmap)
-
-    def create_pattern_image(self, pattern_type, size, density):
-        """Create a pattern image based on type and parameters"""
-        try:
-            img_size = 512
-            img = Image.new('RGBA', (img_size, img_size), (255, 255, 255, 0))
-            draw = ImageDraw.Draw(img)
-
-            if pattern_type == "Gradient":
-                for i in range(img_size):
-                    color = int(255 * (i / img_size))
-                    draw.rectangle([(0, i), (img_size, i+1)], fill=(color, color, color, 255))
-
-            elif pattern_type == "Checkerboard":
-                square_size = size
-                for x in range(0, img_size, square_size):
-                    for y in range(0, img_size, square_size):
-                        if (x // square_size + y // square_size) % 2 == 0:
-                            draw.rectangle([(x, y), (x+square_size, y+square_size)],
-                                         fill=(0, 0, 0, 255))
-
-            elif pattern_type == "Stripes":
-                stripe_width = size
-                for x in range(0, img_size, stripe_width * 2):
-                    draw.rectangle([(x, 0), (x+stripe_width, img_size)], fill=(0, 0, 0, 255))
-
-            elif pattern_type == "Dots":
-                spacing = size
-                radius = size // (2 * density)
-                for x in range(radius, img_size, spacing):
-                    for y in range(radius, img_size, spacing):
-                        draw.ellipse([(x-radius, y-radius), (x+radius, y+radius)],
-                                   fill=(0, 0, 0, 255))
-
-            elif pattern_type == "Circles":
-                center = img_size // 2
-                max_radius = img_size // 2
-                step = max_radius // (density * 2)
-                for r in range(step, max_radius, step):
-                    draw.ellipse([(center-r, center-r), (center+r, center+r)],
-                               outline=(0, 0, 0, 255), width=2)
-
-            # Save pattern
-            pattern_path = Path("temp_pattern.png")
-            img.save(pattern_path)
-            return str(pattern_path)
-
-        except Exception as e:
-            print(f"Error generating pattern: {e}")
-            return None
-
-class ColorOptionWidget(QWidget):
-    colorSelected = pyqtSignal(str)
-
-    def __init__(self, color, parent=None):
-        super().__init__(parent)
-        self.color = color
-        self.setup_ui()
-
-    def setup_ui(self):
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
-
-        self.color_label = QLabel()
-        self.color_label.setFixedSize(30, 30)
-        self.color_label.setStyleSheet(f"background-color: {self.color}; border: 1px solid #ccc;")
-
-        self.select_btn = QPushButton(self.color)
-        self.select_btn.clicked.connect(self.on_color_selected)
-
-        layout.addWidget(self.color_label)
-        layout.addWidget(self.select_btn)
-
-    def on_color_selected(self):
-        self.colorSelected.emit(self.color)
-
-class DragDropLabel(QLabel):
-    colorsExtracted = pyqtSignal(list)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAcceptDrops(True)
-        self.setAlignment(Qt.AlignCenter)
-        self.setText("Drag & drop wallpaper here\nor click to browse")
-        self.setStyleSheet("""
-            QLabel {
-                border: 2px dashed #ccc;
-                border-radius: 10px;
-                padding: 20px;
-                background-color: #f8f9fa;
-                color: #666;
-            }
-            QLabel:hover {
-                border-color: #007bff;
-                background-color: #e3f2fd;
-            }
-        """)
-        self.setMinimumSize(200, 100)
-
-    def dragEnterEvent(self, event: QDragEnterEvent):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-
-    def dropEvent(self, event: QDropEvent):
-        urls = event.mimeData().urls()
-        if urls:
-            file_path = urls[0].toLocalFile()
-            self.extract_colors_from_image(file_path)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            file_path, _ = QFileDialog.getOpenFileName(
-                self, "Select Wallpaper", "",
-                "Images (*.png *.jpg *.jpeg *.bmp *.tiff *.webp)"
-            )
-            if file_path:
-                self.extract_colors_from_image(file_path)
-
-    def extract_colors_from_image(self, file_path):
-        try:
-            colors = self.extract_dominant_colors(file_path)
-            if colors:
-                self.colorsExtracted.emit(colors)
-                self.setStyleSheet(f"""
-                    QLabel {{
-                        border: 2px solid #28a745;
-                        border-radius: 10px;
-                        padding: 20px;
-                        background-color: #f8f9fa;
-                        color: #666;
-                        font-weight: bold;
-                    }}
-                """)
-                self.setText("Colors extracted! Select one below")
-            else:
-                QMessageBox.warning(self, "Error", "Could not extract colors from image")
-        except Exception as e:
-            QMessageBox.warning(self, "Error", f"Error processing image: {str(e)}")
-
-    def extract_dominant_colors(self, image_path):
-        """Extract the 5 most dominant colors from an image"""
-        try:
-            img = Image.open(image_path)
-            img = img.resize((100, 100))
-            img = img.convert('RGB')
-
-            # Simple color extraction without sklearn
-            pixels = img.getdata()
-            color_counts = Counter(pixels)
-
-            # Get top 5 colors
-            top_colors = color_counts.most_common(5)
-
-            colors = []
-            for (r, g, b), _ in top_colors:
-                colors.append(f'#{r:02x}{g:02x}{b:02x}')
-
-            return colors[:5] if len(colors) >= 5 else colors
-
-        except Exception as e:
-            print(f"Error extracting colors: {e}")
-            return None
-
-class PlistSettingsWidget(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setup_ui()
-
-    def setup_ui(self):
-        layout = QVBoxLayout(self)
-
-        # Shadow radius settings
-        shadow_group = QGroupBox("Window Shadow Settings")
-        shadow_layout = QGridLayout(shadow_group)
-
-        shadow_layout.addWidget(QLabel("Active Window Shadow Radius:"), 0, 0)
-        self.active_shadow_spin = QSpinBox()
-        self.active_shadow_spin.setRange(0, 30)
-        self.active_shadow_spin.setValue(9)
-        shadow_layout.addWidget(self.active_shadow_spin, 0, 1)
-
-        shadow_layout.addWidget(QLabel("Inactive Window Shadow Radius:"), 1, 0)
-        self.inactive_shadow_spin = QSpinBox()
-        self.inactive_shadow_spin.setRange(0, 30)
-        self.inactive_shadow_spin.setValue(11)
-        shadow_layout.addWidget(self.inactive_shadow_spin, 1, 1)
-
-        layout.addWidget(shadow_group)
-
-        # Dock settings
-        dock_group = QGroupBox("Dock Settings")
-        dock_layout = QGridLayout(dock_group)
-
-        self.dock_reflection_checkbox = QCheckBox("Dock Reflection")
-        self.dock_reflection_checkbox.setChecked(True)
-        dock_layout.addWidget(self.dock_reflection_checkbox, 0, 0)
-
-        self.dock_touches_ground_checkbox = QCheckBox("Dock Touches Ground")
-        self.dock_touches_ground_checkbox.setChecked(True)
-        dock_layout.addWidget(self.dock_touches_ground_checkbox, 0, 1)
-
-        layout.addWidget(dock_group)
-
-        # Other settings
-        other_group = QGroupBox("Other Settings")
-        other_layout = QGridLayout(other_group)
-
-        self.hide_window_rim_checkbox = QCheckBox("Hide Window Rim")
-        self.hide_window_rim_checkbox.setChecked(False)
-        other_layout.addWidget(self.hide_window_rim_checkbox, 0, 0)
-
-        self.mini_toolbar_checkbox = QCheckBox("Mini Toolbar")
-        self.mini_toolbar_checkbox.setChecked(True)
-        other_layout.addWidget(self.mini_toolbar_checkbox, 0, 1)
-
-        self.patch_appearance_checkbox = QCheckBox("Patch Appearance")
-        self.patch_appearance_checkbox.setChecked(True)
-        other_layout.addWidget(self.patch_appearance_checkbox, 1, 0)
-
-        layout.addWidget(other_group)
-
-        # Control spacing
-        spacing_group = QGroupBox("Control Spacing")
-        spacing_layout = QHBoxLayout(spacing_group)
-
-        spacing_layout.addWidget(QLabel("Control Spacing:"))
-        self.control_spacing_spin = QSpinBox()
-        self.control_spacing_spin.setRange(0, 20)
-        self.control_spacing_spin.setValue(7)
-        spacing_layout.addWidget(self.control_spacing_spin)
-
-        layout.addWidget(spacing_group)
-
-        # Info label
-        self.info_label = QLabel("These settings will be applied to the settings.plist file in the theme folder.")
-        self.info_label.setWordWrap(True)
-        self.info_label.setStyleSheet("color: #666; padding: 5px;")
-        layout.addWidget(self.info_label)
-
-        layout.addStretch()
 
 class ColorizerApp(QMainWindow):
     def __init__(self):
@@ -444,22 +85,27 @@ class ColorizerApp(QMainWindow):
         self.setup_main_tab(main_tab)
         self.tab_widget.addTab(main_tab, "Main Controls")
 
-        # Tab 2: Color Profiles
+        # Tab 2: Manual Color Adjustment (NEW)
+        manual_tab = QWidget()
+        self.setup_manual_tab(manual_tab)
+        self.tab_widget.addTab(manual_tab, "Manual Colors")
+
+        # Tab 3: Color Profiles
         profiles_tab = QWidget()
         self.setup_profiles_tab(profiles_tab)
         self.tab_widget.addTab(profiles_tab, "Color Profiles")
 
-        # Tab 3: Pattern Generator
+        # Tab 4: Pattern Generator
         patterns_tab = QWidget()
         self.setup_patterns_tab(patterns_tab)
         self.tab_widget.addTab(patterns_tab, "Pattern Generator")
 
-        # Tab 4: Advanced Settings
+        # Tab 5: Advanced Settings
         advanced_tab = QWidget()
         self.setup_advanced_tab(advanced_tab)
         self.tab_widget.addTab(advanced_tab, "Advanced")
 
-        # Tab 5: Plist Settings
+        # Tab 6: Plist Settings
         plist_tab = QWidget()
         self.setup_plist_tab(plist_tab)
         self.tab_widget.addTab(plist_tab, "Plist Settings")
@@ -528,7 +174,7 @@ class ColorizerApp(QMainWindow):
         color_layout = QVBoxLayout(color_group)
 
         self.drag_drop_label = DragDropLabel()
-        self.drag_drop_label.setMinimumHeight(120)
+        self.drag_drop_label.setMinimumHeight(30)
         self.drag_drop_label.colorsExtracted.connect(self.on_colors_extracted)
         color_layout.addWidget(self.drag_drop_label)
 
@@ -543,7 +189,7 @@ class ColorizerApp(QMainWindow):
         manual_layout = QHBoxLayout()
         manual_layout.addWidget(QLabel("Or enter HEX color:"))
 
-        self.color_input = QLineEdit("#FF4500")
+        self.color_input = QLineEdit("##E6E0FF")
         self.color_input.setMaximumWidth(100)
         self.color_input.textChanged.connect(self.on_color_changed)
         manual_layout.addWidget(self.color_input)
@@ -558,7 +204,7 @@ class ColorizerApp(QMainWindow):
         # Color preview
         self.color_preview = QLabel()
         self.color_preview.setFixedHeight(40)
-        self.color_preview.setStyleSheet("background-color: #FF4500; border: 1px solid #ccc;")
+        self.color_preview.setStyleSheet("background-color: #E6E0FF; border: 1px solid #ccc;")
         color_layout.addWidget(self.color_preview)
 
         layout.addWidget(color_group)
@@ -609,6 +255,23 @@ class ColorizerApp(QMainWindow):
         adjustments_layout.addLayout(brightness_layout)
 
         layout.addWidget(adjustments_group)
+
+        # Color Variations
+        variations_group = QGroupBox("Color Variations")
+        variations_layout = QVBoxLayout(variations_group)
+
+        self.color_variations_widget = ColorVariationsWidget()
+        self.color_variations_widget.variationSelected.connect(self.on_variation_selected)
+        variations_layout.addWidget(self.color_variations_widget)
+
+        layout.addWidget(variations_group)
+
+    def setup_manual_tab(self, parent):
+        layout = QVBoxLayout(parent)
+
+        self.manual_color_widget = ManualColorAdjustmentWidget()
+        self.manual_color_widget.colorChanged.connect(self.on_manual_color_changed)
+        layout.addWidget(self.manual_color_widget)
 
     def setup_profiles_tab(self, parent):
         layout = QVBoxLayout(parent)
@@ -698,15 +361,15 @@ class ColorizerApp(QMainWindow):
         white_layout = QHBoxLayout()
         white_layout.addWidget(QLabel("White Threshold:"))
         self.white_threshold = QSpinBox()
-        self.white_threshold.setRange(200, 255)
-        self.white_threshold.setValue(245)
+        self.white_threshold.setRange(100, 255)
+        self.white_threshold.setValue(254)
         white_layout.addWidget(self.white_threshold)
         threshold_layout.addLayout(white_layout)
 
         black_layout = QHBoxLayout()
         black_layout.addWidget(QLabel("Black Threshold:"))
         self.black_threshold = QSpinBox()
-        self.black_threshold.setRange(0, 100)
+        self.black_threshold.setRange(0, 200)
         self.black_threshold.setValue(30)
         black_layout.addWidget(self.black_threshold)
         threshold_layout.addLayout(black_layout)
@@ -743,6 +406,14 @@ class ColorizerApp(QMainWindow):
             else:
                 self.theme_info_label.setText("No previous configuration found")
 
+    def on_manual_color_changed(self, item_name, color):
+        """Handle manual color changes for specific items"""
+        print(f"Color changed for {item_name}: {color}")
+        # Store the manual color adjustments
+        if not hasattr(self, 'manual_colors'):
+            self.manual_colors = {}
+        self.manual_colors[item_name] = color
+
     def load_last_config(self):
         """Load the last used configuration for current theme"""
         theme_path = self.get_selected_theme()
@@ -752,8 +423,15 @@ class ColorizerApp(QMainWindow):
             self.intensity_spin.setValue(config['intensity'])
             self.saturation_slider.setValue(int(config.get('saturation', 1.0) * 100))
             self.brightness_slider.setValue(int(config.get('brightness', 1.0) * 100))
+
+            # Reset manual colors when loading a new config
+            if hasattr(self, 'manual_colors'):
+                self.manual_colors = {}
+            if hasattr(self, 'manual_color_widget'):
+                self.manual_color_widget.set_base_color(config['color'])
+
             QMessageBox.information(self, "Config Loaded",
-                                   f"Loaded configuration for {theme_path.name}")
+                                    f"Loaded configuration for {theme_path.name}")
 
     def update_history_list(self):
         """Update the history list widget"""
@@ -770,6 +448,12 @@ class ColorizerApp(QMainWindow):
         self.intensity_spin.setValue(profile['intensity'])
         self.saturation_slider.setValue(int(profile['saturation'] * 100))
         self.brightness_slider.setValue(int(profile['brightness'] * 100))
+
+        # Reset manual colors when applying a profile
+        if hasattr(self, 'manual_colors'):
+            self.manual_colors = {}
+        if hasattr(self, 'manual_color_widget'):
+            self.manual_color_widget.set_base_color(profile['color'])
 
     def save_custom_profile(self):
         """Save current settings as custom profile"""
@@ -820,6 +504,7 @@ class ColorizerApp(QMainWindow):
 
         # Add new color options
         for i, color in enumerate(colors):
+            from widgets.color_option_widget import ColorOptionWidget
             color_widget = ColorOptionWidget(color)
             color_widget.colorSelected.connect(self.on_color_selected)
             self.colors_grid.addWidget(color_widget, i // 3, i % 3)
@@ -833,6 +518,12 @@ class ColorizerApp(QMainWindow):
     def on_color_changed(self, color):
         if color.startswith('#'):
             self.update_color_preview(color)
+            # Update color variations
+            if hasattr(self, 'color_variations_widget'):
+                self.color_variations_widget.set_base_color(color)
+            # Update manual color widget
+            if hasattr(self, 'manual_color_widget'):
+                self.manual_color_widget.set_base_color(color)
 
     def update_color_preview(self, color):
         self.color_preview.setStyleSheet(f"background-color: {color}; border: 1px solid #ccc;")
@@ -884,7 +575,7 @@ class ColorizerApp(QMainWindow):
             )
 
             # Process the plist file
-            self.process_plist_file(input_dir, color, intensity, create_new)
+            self.process_plist_file(input_dir, color, intensity, saturation, brightness, create_new)
 
             # Update history
             self.update_history_list()
@@ -906,9 +597,9 @@ class ColorizerApp(QMainWindow):
             QMessageBox.critical(self, "Error", f"Error restoring backup: {str(e)}")
 
     def process_theme_files(self, input_dir, color, intensity, saturation, brightness,
-                           create_new, tint_checkboxes, tint_windowframes,
-                           preserve_transparency, preserve_whites, preserve_blacks,
-                           white_threshold, black_threshold):
+                            create_new, tint_checkboxes, tint_windowframes,
+                            preserve_transparency, preserve_whites, preserve_blacks,
+                            white_threshold, black_threshold):
         """Process theme files with enhanced parameters"""
         try:
             folder_name = input_dir.name
@@ -938,7 +629,7 @@ class ColorizerApp(QMainWindow):
                 process_folder = input_dir
 
             # Get files to process
-            files = self.get_top_level_files(process_folder, tint_checkboxes, tint_windowframes)
+            files = get_top_level_files(process_folder, tint_checkboxes, tint_windowframes, SUPPORTED)
 
             if not files:
                 QMessageBox.warning(self, "Warning", "No supported images found to process")
@@ -947,27 +638,85 @@ class ColorizerApp(QMainWindow):
             # Apply pattern if enabled
             pattern_path = None
             pattern_blend = 0
+            pattern_filters = []
+
             if hasattr(self, 'apply_pattern_checkbox') and self.apply_pattern_checkbox.isChecked():
                 if hasattr(self, 'current_pattern_path'):
                     pattern_path = self.current_pattern_path
                     pattern_blend = self.pattern_blend_slider.value() / 100.0
 
+                    # Get pattern filters from UI
+                    if hasattr(self.pattern_widget, 'apply_mica_header') and self.pattern_widget.apply_mica_header.isChecked():
+                        pattern_filters.append('Mica: Header')
+                    if hasattr(self.pattern_widget, 'apply_mica_sidebar') and self.pattern_widget.apply_mica_sidebar.isChecked():
+                        pattern_filters.append('Mica: Sidebar')
+                    if hasattr(self.pattern_widget, 'apply_mica_titlebar') and self.pattern_widget.apply_mica_titlebar.isChecked():
+                        pattern_filters.append('Mica: Titlebar')
+                    if hasattr(self.pattern_widget, 'apply_mica_menu') and self.pattern_widget.apply_mica_menu.isChecked():
+                        pattern_filters.append('Mica: Menu')
+                    if hasattr(self.pattern_widget, 'apply_mica_window_bg') and self.pattern_widget.apply_mica_window_bg.isChecked():
+                        pattern_filters.append('Mica: WindowBackground')
+
+            # Check for color variations
+            use_variations = (hasattr(self, 'color_variations_widget') and
+                             self.color_variations_widget.enable_variations.isChecked())
+
+            variations = []
+            if use_variations:
+                variations = self.color_variations_widget.variations
+
             total_files = len(files)
             for i, file in enumerate(files):
+                # Determine which color to use for this file
+                if use_variations and variations:
+                    # Use different color variation for each file (cyclic)
+                    variation_index = i % len(variations)
+                    file_color = variations[variation_index]
+                else:
+                    file_color = color
+
+                # Check if pattern should be applied to this file
+                apply_pattern_to_file = False
+                if pattern_path and pattern_filters:
+                    filename = file.name
+                    # Check if filename matches any of the selected filters
+                    for pattern_filter in pattern_filters:
+                        if filename.startswith(pattern_filter):
+                            apply_pattern_to_file = True
+                            break
+
                 colorize_enhanced(
-                    file, color, intensity, saturation, brightness,
+                    file, file_color, intensity, saturation, brightness,
                     process_folder, input_dir,
                     preserve_transparency, preserve_whites, preserve_blacks,
                     white_threshold, black_threshold,
-                    pattern_path, pattern_blend
+                    pattern_path if apply_pattern_to_file else None,  # Only apply pattern if file matches filters
+                    pattern_blend if apply_pattern_to_file else 0
                 )
                 self.progress_bar.setValue(int((i + 1) / total_files * 100))
+
+            # Check for manual color overrides
+            manual_color = None
+            if hasattr(self, 'manual_colors') and file.name in self.manual_colors:
+                manual_color = self.manual_colors[file.name]
+
+            # Use manual color if specified, otherwise use the determined color
+            final_color = manual_color if manual_color else file_color
+
+            colorize_enhanced(
+                file, final_color, intensity, saturation, brightness,
+                process_folder, input_dir,
+                preserve_transparency, preserve_whites, preserve_blacks,
+                white_threshold, black_threshold,
+                pattern_path if apply_pattern_to_file else None,
+                pattern_blend if apply_pattern_to_file else 0
+            )
 
         except Exception as e:
             raise Exception(f"Error processing theme files: {str(e)}")
 
-    def process_plist_file(self, input_dir, color, intensity, create_new):
-        """Process the settings.plist file with color adjustments"""
+    def process_plist_file(self, input_dir, color, intensity, saturation, brightness, create_new):
+        """Process the settings.plist file with all available options"""
         try:
             if create_new:
                 folder_name = input_dir.name
@@ -986,38 +735,118 @@ class ColorizerApp(QMainWindow):
             with open(plist_path, 'rb') as f:
                 plist_data = plistlib.load(f)
 
-            # Get plist settings from UI
+            # Get all settings from UI
             active_shadow = self.plist_widget.active_shadow_spin.value()
             inactive_shadow = self.plist_widget.inactive_shadow_spin.value()
             dock_reflection = self.plist_widget.dock_reflection_checkbox.isChecked()
             dock_touches_ground = self.plist_widget.dock_touches_ground_checkbox.isChecked()
+            dock_slices = self.plist_widget.dock_slices_input.text()
             hide_window_rim = self.plist_widget.hide_window_rim_checkbox.isChecked()
             mini_toolbar = self.plist_widget.mini_toolbar_checkbox.isChecked()
             patch_appearance = self.plist_widget.patch_appearance_checkbox.isChecked()
             control_spacing = self.plist_widget.control_spacing_spin.value()
 
-            # Update non-color values
-            if 'gWindowShadowActiveRadius' in plist_data:
-                plist_data['gWindowShadowActiveRadius'] = active_shadow
-            if 'gWindowShadowInactiveRadius' in plist_data:
-                plist_data['gWindowShadowInactiveRadius'] = inactive_shadow
-            if 'gDockReflection' in plist_data:
-                plist_data['gDockReflection'] = dock_reflection
-            if 'gDockTouchesGround' in plist_data:
-                plist_data['gDockTouchesGround'] = dock_touches_ground
-            if 'gHideWindowRim' in plist_data:
-                plist_data['gHideWindowRim'] = hide_window_rim
-            if 'gMiniToolbar' in plist_data:
-                plist_data['gMiniToolbar'] = mini_toolbar
-            if 'gPatchAppearance' in plist_data:
-                plist_data['gPatchAppearance'] = patch_appearance
-            if 'gControlSpacing' in plist_data:
-                plist_data['gControlSpacing'] = control_spacing
+            # Mica settings
+            mica_header = self.plist_widget.mica_header_checkbox.isChecked()
+            mica_sidebar = self.plist_widget.mica_sidebar_checkbox.isChecked()
+            mica_titlebar = self.plist_widget.mica_titlebar_checkbox.isChecked()
+            mica_menu = self.plist_widget.mica_menu_checkbox.isChecked()
+            mica_window_bg = self.plist_widget.mica_window_bg_checkbox.isChecked()
+
+            # Asset slice settings
+            window_frame_mask_1x = self.plist_widget.window_frame_mask_1x.text()
+            window_frame_base_1x = self.plist_widget.window_frame_base_1x.text()
+            window_frame_mask_2x = self.plist_widget.window_frame_mask_2x.text()
+            window_frame_base_2x = self.plist_widget.window_frame_base_2x.text()
+
+            # Update basic settings
+            plist_data['gWindowShadowActiveRadius'] = active_shadow
+            plist_data['gWindowShadowInactiveRadius'] = inactive_shadow
+            plist_data['gDockReflection'] = dock_reflection
+            plist_data['gDockTouchesGround'] = dock_touches_ground
+            plist_data['gDockSlices'] = dock_slices
+            plist_data['gHideWindowRim'] = hide_window_rim
+            plist_data['gMiniToolbar'] = mini_toolbar
+            plist_data['gPatchAppearance'] = patch_appearance
+            plist_data['gControlSpacing'] = control_spacing
+
+            # Update Mica settings
+            if 'gMicaTile' not in plist_data:
+                plist_data['gMicaTile'] = {}
+
+            mica_dict = plist_data['gMicaTile']
+
+            # Header Mica
+            mica_dict['Mica: Header_Active_Normal_Off_Base0'] = mica_header
+            mica_dict['Mica: Header_Active_Normal_Off_Base0@2x'] = mica_header
+            mica_dict['Mica: Header_Inactive_Normal_Off_Base0'] = mica_header
+            mica_dict['Mica: Header_Inactive_Normal_Off_Base0@2x'] = mica_header
+            mica_dict['Mica: Header-Opaque_Active_Normal_Off_Base0'] = mica_header
+            mica_dict['Mica: Header-Opaque_Active_Normal_Off_Base0@2x'] = mica_header
+            mica_dict['Mica: Header-Opaque_Inactive_Normal_Off_Base0'] = mica_header
+            mica_dict['Mica: Header-Opaque_Inactive_Normal_Off_Base0@2x'] = mica_header
+
+            # Sidebar Mica
+            mica_dict['Mica: Sidebar_Active_Normal_Off_Base0'] = mica_sidebar
+            mica_dict['Mica: Sidebar_Active_Normal_Off_Base0@2x'] = mica_sidebar
+            mica_dict['Mica: Sidebar_Inactive_Normal_Off_Base0'] = mica_sidebar
+            mica_dict['Mica: Sidebar_Inactive_Normal_Off_Base0@2x'] = mica_sidebar
+            mica_dict['Mica: Sidebar-Opaque_Active_Normal_Off_Base0'] = mica_sidebar
+            mica_dict['Mica: Sidebar-Opaque_Active_Normal_Off_Base0@2x'] = mica_sidebar
+            mica_dict['Mica: Sidebar-Opaque_Inactive_Normal_Off_Base0'] = mica_sidebar
+            mica_dict['Mica: Sidebar-Opaque_Inactive_Normal_Off_Base0@2x'] = mica_sidebar
+
+            # Titlebar Mica
+            mica_dict['Mica: Titlebar_Active_Normal_Off_Base0'] = mica_titlebar
+            mica_dict['Mica: Titlebar_Active_Normal_Off_Base0@2x'] = mica_titlebar
+            mica_dict['Mica: Titlebar_Inactive_Normal_Off_Base0'] = mica_titlebar
+            mica_dict['Mica: Titlebar_Inactive_Normal_Off_Base0@2x'] = mica_titlebar
+            mica_dict['Mica: Titlebar-Opaque_Active_Normal_Off_Base0'] = mica_titlebar
+            mica_dict['Mica: Titlebar-Opaque_Active_Normal_Off_Base0@2x'] = mica_titlebar
+            mica_dict['Mica: Titlebar-Opaque_Inactive_Normal_Off_Base0'] = mica_titlebar
+            mica_dict['Mica: Titlebar-Opaque_Inactive_Normal_Off_Base0@2x'] = mica_titlebar
+
+            # Menu Mica
+            mica_dict['Mica: Menu_Active_Normal_Off_Base0'] = mica_menu
+            mica_dict['Mica: Menu_Active_Normal_Off_Base0@2x'] = mica_menu
+            mica_dict['Mica: Menu_Inactive_Normal_Off_Base0'] = mica_menu
+            mica_dict['Mica: Menu_Inactive_Normal_Off_Base0@2x'] = mica_menu
+            mica_dict['Mica: Menu-Opaque_Active_Normal_Off_Base0'] = mica_menu
+            mica_dict['Mica: Menu-Opaque_Active_Normal_Off_Base0@2x'] = mica_menu
+            mica_dict['Mica: Menu-Opaque_Inactive_Normal_Off_Base0'] = mica_menu
+            mica_dict['Mica: Menu-Opaque_Inactive_Normal_Off_Base0@2x'] = mica_menu
+
+            # Window Background Mica
+            mica_dict['Mica: WindowBackground_Active_Normal_Off_Base0'] = mica_window_bg
+            mica_dict['Mica: WindowBackground_Active_Normal_Off_Base0@2x'] = mica_window_bg
+            mica_dict['Mica: WindowBackground_Inactive_Normal_Off_Base0'] = mica_window_bg
+            mica_dict['Mica: WindowBackground_Inactive_Normal_Off_Base0@2x'] = mica_window_bg
+            mica_dict['Mica: WindowBackground-Opaque_Active_Normal_Off_Base0'] = mica_window_bg
+            mica_dict['Mica: WindowBackground-Opaque_Active_Normal_Off_Base0@2x'] = mica_window_bg
+            mica_dict['Mica: WindowBackground-Opaque_Inactive_Normal_Off_Base0'] = mica_window_bg
+            mica_dict['Mica: WindowBackground-Opaque_Inactive_Normal_Off_Base0@2x'] = mica_window_bg
+
+            # Update asset slice settings
+            if 'gAssetSlice' not in plist_data:
+                plist_data['gAssetSlice'] = {}
+
+            asset_dict = plist_data['gAssetSlice']
+            asset_dict['WindowFrame_WindowShapeEdges_Regular_Active_Normal_Off_Mask0'] = window_frame_mask_1x
+            asset_dict['WindowFrame_WindowShapeEdges_Regular_Active_Normal_Off_Base0'] = window_frame_base_1x
+            asset_dict['WindowFrame_WindowShapeEdges_Regular_Active_Normal_Off_Mask0@2x'] = window_frame_mask_2x
+            asset_dict['WindowFrame_WindowShapeEdges_Regular_Active_Normal_Off_Base0@2x'] = window_frame_base_2x
+            asset_dict['WindowFrame_WindowShapeEdges_Regular_Inactive_Normal_Off_Mask0'] = window_frame_mask_1x
+            asset_dict['WindowFrame_WindowShapeEdges_Regular_Inactive_Normal_Off_Base0'] = window_frame_base_1x
+            asset_dict['WindowFrame_WindowShapeEdges_Regular_Inactive_Normal_Off_Mask0@2x'] = window_frame_mask_2x
+            asset_dict['WindowFrame_WindowShapeEdges_Regular_Inactive_Normal_Off_Base0@2x'] = window_frame_base_2x
 
             # Update color values if gColors exists
             if 'gColors' in plist_data:
                 color_dict = plist_data['gColors']
                 r_col, g_col, b_col = hex_to_rgb(color)
+
+                # Aplicar ajustes de saturação e brilho à cor base
+                r_col_adj, g_col_adj, b_col_adj = adjust_color_hsv(r_col, g_col, b_col, saturation, brightness)
 
                 for key, value in color_dict.items():
                     if isinstance(value, str) and value.startswith('#'):
@@ -1029,10 +858,10 @@ class ColorizerApp(QMainWindow):
                             b_orig = int(original_hex[4:6], 16)
                             a_orig = original_hex[6:8]
 
-                            # Apply color tinting
-                            r_new = round(r_orig*(1-intensity) + r_col*intensity)
-                            g_new = round(g_orig*(1-intensity) + g_col*intensity)
-                            b_new = round(b_orig*(1-intensity) + b_col*intensity)
+                            # Apply color tinting with adjusted color
+                            r_new = round(r_orig*(1-intensity) + r_col_adj*intensity)
+                            g_new = round(g_orig*(1-intensity) + g_col_adj*intensity)
+                            b_new = round(b_orig*(1-intensity) + b_col_adj*intensity)
 
                             # Clamp values
                             r_new = max(0, min(255, r_new))
@@ -1053,29 +882,20 @@ class ColorizerApp(QMainWindow):
             print(f"Error processing plist file: {e}")
             raise
 
-    def restore_backup_files(self, input_dir):
-        """Restore backup files"""
-        backup_folder = input_dir / 'backup'
-        if not backup_folder.exists():
-            raise Exception("No backup found")
-
-        files = []
-        for item in backup_folder.iterdir():
-            if item.is_file() and item.suffix.lower() in SUPPORTED:
-                files.append(item)
-
-        for file in files:
-            dest = input_dir / file.name
-            shutil.copy2(file, dest)
-
     def create_backup(self, input_dir):
-        """Create backup of all image files"""
+        """Create backup of all image files and plist"""
         backup_folder = input_dir / 'backup'
         backup_folder.mkdir(exist_ok=True)
 
-        all_image_files = self.get_all_image_files(input_dir)
+        # Get all image files
+        all_image_files = get_all_image_files(input_dir, SUPPORTED)
 
-        print(f"Creating backup of {len(all_image_files)} images...")
+        # Get plist file if exists
+        plist_file = input_dir / "settings.plist"
+        if plist_file.exists():
+            all_image_files.append(plist_file)
+
+        print(f"Creating backup of {len(all_image_files)} files...")
 
         backed_up_count = 0
         for file in all_image_files:
@@ -1090,153 +910,65 @@ class ColorizerApp(QMainWindow):
         else:
             print(f"Backup created with {backed_up_count} files")
 
-    def get_all_image_files(self, directory):
-        """Get all image files from directory"""
-        files = []
-        for item in directory.iterdir():
-            if item.name == 'backup':
-                continue
-            if item.is_file() and item.suffix.lower() in SUPPORTED:
-                files.append(item)
-        return files
-
-    def get_top_level_files(self, directory, tint_checkboxes=True, tint_windowframes=True):
-        """Get files to process based on user preferences"""
-        files = []
-        for item in directory.iterdir():
-            if item.name == 'backup':
-                continue
-            if item.is_file() and item.suffix.lower() in SUPPORTED:
-                filename_lower = item.name.lower()
-                if not tint_checkboxes and filename_lower.startswith('checkbox'):
-                    continue
-                if not tint_windowframes and (filename_lower.startswith('windowframe') or filename_lower.startswith('frame')):
-                    continue
-                files.append(item)
-        return files
-
     def copy_all_items(self, src_dir, dest_dir, tint_checkboxes=True, tint_windowframes=True):
-        """Copy all items with filtering"""
-        for item in src_dir.iterdir():
-            if item.name == 'backup':
-                continue
+         """Copy all items with filtering, including plist and Mica files"""
+         for item in src_dir.iterdir():
+             if item.name == 'backup':
+                 continue
 
-            dest_path = dest_dir / item.name
+             dest_path = dest_dir / item.name
 
-            if item.is_file() and item.suffix.lower() in SUPPORTED:
-                filename_lower = item.name.lower()
-                should_skip = False
+             if item.is_file():
+                 # Always copy plist file and Mica files
+                 if (item.name == "settings.plist" or
+                     item.name.startswith('Mica:') or
+                     'Mica' in item.name):
+                     shutil.copy2(item, dest_path)
+                     print(f"Copied: {item.name}")
+                     continue
 
-                if not tint_checkboxes and filename_lower.startswith('checkbox'):
-                    should_skip = True
-                if not tint_windowframes and (filename_lower.startswith('windowframe') or filename_lower.startswith('frame')):
-                    should_skip = True
+                 # Filter image files based on user preferences
+                 if item.suffix.lower() in SUPPORTED:
+                     filename_lower = item.name.lower()
+                     should_skip = False
 
-                if should_skip:
-                    continue
+                     if not tint_checkboxes and filename_lower.startswith('checkbox'):
+                         should_skip = True
+                     if not tint_windowframes and (filename_lower.startswith('windowframe') or filename_lower.startswith('frame')):
+                         should_skip = True
 
-            if item.is_file():
-                shutil.copy2(item, dest_path)
-                print(f"Copied: {item.name}")
-            elif item.is_dir():
-                shutil.copytree(item, dest_path, dirs_exist_ok=True)
-                print(f"Copied directory: {item.name}")
+                     if should_skip:
+                         continue
 
-# Enhanced utility functions
-def hex_to_rgb(hex_color):
-    hex_color = hex_color.lstrip('#')
-    lv = len(hex_color)
-    return tuple(int(hex_color[i:i+lv//3], 16) for i in range(0, lv, lv//3))
+                     shutil.copy2(item, dest_path)
+                     print(f"Copied: {item.name}")
+                 else:
+                     # Copy other non-image files
+                     shutil.copy2(item, dest_path)
+                     print(f"Copied: {item.name}")
+             elif item.is_dir():
+                 shutil.copytree(item, dest_path, dirs_exist_ok=True)
+                 print(f"Copied directory: {item.name}")
 
-def rgb_to_hsv(r, g, b):
-    r, g, b = r/255.0, g/255.0, b/255.0
-    return colorsys.rgb_to_hsv(r, g, b)
+    def restore_backup_files(self, input_dir):
+        """Restore backup files including plist"""
+        backup_folder = input_dir / 'backup'
+        if not backup_folder.exists():
+            raise Exception("No backup found")
 
-def hsv_to_rgb(h, s, v):
-    r, g, b = colorsys.hsv_to_rgb(h, s, v)
-    return int(r * 255), int(g * 255), int(b * 255)
+        files = []
+        for item in backup_folder.iterdir():
+            # Include both image files and plist file
+            if (item.is_file() and
+                (item.suffix.lower() in SUPPORTED or item.name == "settings.plist")):
+                files.append(item)
 
-def adjust_color_hsv(r, g, b, saturation_factor, brightness_factor):
-    """Adjust color saturation and brightness in HSV space"""
-    h, s, v = rgb_to_hsv(r, g, b)
-    s = min(1.0, s * saturation_factor)
-    v = min(1.0, v * brightness_factor)
-    return hsv_to_rgb(h, s, v)
+        for file in files:
+            dest = input_dir / file.name
+            shutil.copy2(file, dest)
+            print(f"Restored: {file.name}")
 
-def is_white_pixel(r, g, b, threshold=245):
-    """Check if pixel is white or almost white"""
-    return r >= threshold and g >= threshold and b >= threshold
-
-def is_black_pixel(r, g, b, threshold=30):
-    """Check if pixel is black or almost black"""
-    return r <= threshold and g <= threshold and b <= threshold
-
-def apply_pattern_overlay(img, pattern_path, blend_amount):
-    """Apply a pattern overlay to an image"""
-    try:
-        pattern = Image.open(pattern_path).convert("RGBA")
-        pattern = pattern.resize(img.size, Image.LANCZOS)
-
-        # Blend pattern with image
-        blended = Image.blend(img, pattern, blend_amount)
-        return blended
-    except Exception as e:
-        print(f"Error applying pattern: {e}")
-        return img
-
-def colorize_enhanced(file_path, color, intensity, saturation, brightness,
-                      out_folder, input_dir, preserve_transparency=True,
-                      preserve_whites=True, preserve_blacks=True,
-                      white_threshold=245, black_threshold=30,
-                      pattern_path=None, pattern_blend=0):
-    """Enhanced colorization with all new features"""
-    img = Image.open(file_path).convert("RGBA")
-    r_col, g_col, b_col = hex_to_rgb(color)
-    pixels = img.load()
-
-    for y in range(img.height):
-        for x in range(img.width):
-            r, g, b, a = pixels[x, y]
-
-            # Preserve transparency if enabled
-            if preserve_transparency and a == 0:
-                continue
-
-            # Skip white/black pixels if preservation is enabled
-            if preserve_whites and is_white_pixel(r, g, b, white_threshold):
-                continue
-            if preserve_blacks and is_black_pixel(r, g, b, black_threshold):
-                continue
-
-            # Apply color tinting
-            r_new = round(r*(1-intensity) + r_col*intensity)
-            g_new = round(g*(1-intensity) + g_col*intensity)
-            b_new = round(b*(1-intensity) + b_col*intensity)
-
-            # Apply saturation and brightness adjustments
-            r_new, g_new, b_new = adjust_color_hsv(r_new, g_new, b_new, saturation, brightness)
-
-            # Clamp values
-            r_new = max(0, min(255, r_new))
-            g_new = max(0, min(255, g_new))
-            b_new = max(0, min(255, b_new))
-
-            pixels[x, y] = (r_new, g_new, b_new, a)
-
-    # Apply pattern if specified
-    if pattern_path and pattern_blend > 0:
-        img = apply_pattern_overlay(img, pattern_path, pattern_blend)
-
-    out_path = out_folder / file_path.name
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    img.save(out_path)
-
-def main():
-    app = QApplication(sys.argv)
-    app.setStyle('Fusion')  # Modern look
-    window = ColorizerApp()
-    window.show()
-    sys.exit(app.exec_())
-
-if __name__ == "__main__":
-    main()
+    def on_variation_selected(self, color):
+        """Handle color variation selection"""
+        self.color_input.setText(color)
+        self.update_color_preview(color)

@@ -1,9 +1,37 @@
 {
   "/Library/GlowThemes/Snow Leopard": {
-    "color": "#232b41",
-    "intensity": 0.92,
-    "saturation": 0.52,
-    "brightness": 0.66,
-    "timestamp": "1758511456.070903"
+    "color": "##E6E0FF",
+    "intensity": 0.5,
+    "saturation": 1.0,
+    "brightness": 1.0,
+    "timestamp": "1758525395.44077"
+  },
+  "/Library/GlowThemes/Snow Leopard-colorized#9CFFCA_0.1": {
+    "color": "#beffe2",
+    "intensity": 0.07,
+    "saturation": 0.18,
+    "brightness": 1.0,
+    "timestamp": "1758515809.8839762"
+  },
+  "/Library/GlowThemes/Somatic": {
+    "color": "#ee55e8",
+    "intensity": 0.19,
+    "saturation": 0.6,
+    "brightness": 1.33,
+    "timestamp": "1758519452.2001796"
+  },
+  "/Library/GlowThemes/NightFlight": {
+    "color": "#ff3469",
+    "intensity": 0.13,
+    "saturation": 0.57,
+    "brightness": 1.4,
+    "timestamp": "1758516450.6961763"
+  },
+  "/Library/GlowThemes/Snow Leopard Dark": {
+    "color": "#fff3fc",
+    "intensity": 0.25,
+    "saturation": 0.59,
+    "brightness": 1.21,
+    "timestamp": "1758522122.3403573"
   }
 }

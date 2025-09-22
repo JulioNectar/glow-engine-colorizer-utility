@@ -7,7 +7,7 @@ rm -rf build dist Colorizer.spec
 echo "🚀 Construindo com PyInstaller..."
 
 pyinstaller \
-    colorizer.py \
+    main.py \
     --name="Glow Engine Colorizer Utility" \
     --icon="icon.png" \
     --add-data="icon.png:." \
