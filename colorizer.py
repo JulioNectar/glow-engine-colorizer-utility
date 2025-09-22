@@ -3,6 +3,7 @@ import os
 import shutil
 import sys
 import json
+import plistlib
 from pathlib import Path
 from PIL import Image, ImageDraw
 import colorsys
@@ -309,6 +310,84 @@ class DragDropLabel(QLabel):
             print(f"Error extracting colors: {e}")
             return None
 
+class PlistSettingsWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setup_ui()
+
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+
+        # Shadow radius settings
+        shadow_group = QGroupBox("Window Shadow Settings")
+        shadow_layout = QGridLayout(shadow_group)
+
+        shadow_layout.addWidget(QLabel("Active Window Shadow Radius:"), 0, 0)
+        self.active_shadow_spin = QSpinBox()
+        self.active_shadow_spin.setRange(0, 30)
+        self.active_shadow_spin.setValue(9)
+        shadow_layout.addWidget(self.active_shadow_spin, 0, 1)
+
+        shadow_layout.addWidget(QLabel("Inactive Window Shadow Radius:"), 1, 0)
+        self.inactive_shadow_spin = QSpinBox()
+        self.inactive_shadow_spin.setRange(0, 30)
+        self.inactive_shadow_spin.setValue(11)
+        shadow_layout.addWidget(self.inactive_shadow_spin, 1, 1)
+
+        layout.addWidget(shadow_group)
+
+        # Dock settings
+        dock_group = QGroupBox("Dock Settings")
+        dock_layout = QGridLayout(dock_group)
+
+        self.dock_reflection_checkbox = QCheckBox("Dock Reflection")
+        self.dock_reflection_checkbox.setChecked(True)
+        dock_layout.addWidget(self.dock_reflection_checkbox, 0, 0)
+
+        self.dock_touches_ground_checkbox = QCheckBox("Dock Touches Ground")
+        self.dock_touches_ground_checkbox.setChecked(True)
+        dock_layout.addWidget(self.dock_touches_ground_checkbox, 0, 1)
+
+        layout.addWidget(dock_group)
+
+        # Other settings
+        other_group = QGroupBox("Other Settings")
+        other_layout = QGridLayout(other_group)
+
+        self.hide_window_rim_checkbox = QCheckBox("Hide Window Rim")
+        self.hide_window_rim_checkbox.setChecked(False)
+        other_layout.addWidget(self.hide_window_rim_checkbox, 0, 0)
+
+        self.mini_toolbar_checkbox = QCheckBox("Mini Toolbar")
+        self.mini_toolbar_checkbox.setChecked(True)
+        other_layout.addWidget(self.mini_toolbar_checkbox, 0, 1)
+
+        self.patch_appearance_checkbox = QCheckBox("Patch Appearance")
+        self.patch_appearance_checkbox.setChecked(True)
+        other_layout.addWidget(self.patch_appearance_checkbox, 1, 0)
+
+        layout.addWidget(other_group)
+
+        # Control spacing
+        spacing_group = QGroupBox("Control Spacing")
+        spacing_layout = QHBoxLayout(spacing_group)
+
+        spacing_layout.addWidget(QLabel("Control Spacing:"))
+        self.control_spacing_spin = QSpinBox()
+        self.control_spacing_spin.setRange(0, 20)
+        self.control_spacing_spin.setValue(7)
+        spacing_layout.addWidget(self.control_spacing_spin)
+
+        layout.addWidget(spacing_group)
+
+        # Info label
+        self.info_label = QLabel("These settings will be applied to the settings.plist file in the theme folder.")
+        self.info_label.setWordWrap(True)
+        self.info_label.setStyleSheet("color: #666; padding: 5px;")
+        layout.addWidget(self.info_label)
+
+        layout.addStretch()
+
 class ColorizerApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -379,6 +458,11 @@ class ColorizerApp(QMainWindow):
         advanced_tab = QWidget()
         self.setup_advanced_tab(advanced_tab)
         self.tab_widget.addTab(advanced_tab, "Advanced")
+
+        # Tab 5: Plist Settings
+        plist_tab = QWidget()
+        self.setup_plist_tab(plist_tab)
+        self.tab_widget.addTab(plist_tab, "Plist Settings")
 
         # Progress bar (outside tabs)
         self.progress_bar = QProgressBar()
@@ -641,6 +725,12 @@ class ColorizerApp(QMainWindow):
         layout.addWidget(history_group)
         layout.addStretch()
 
+    def setup_plist_tab(self, parent):
+        layout = QVBoxLayout(parent)
+
+        self.plist_widget = PlistSettingsWidget()
+        layout.addWidget(self.plist_widget)
+
     def on_theme_changed(self, theme_name):
         """Handle theme selection change"""
         if theme_name:
@@ -793,6 +883,9 @@ class ColorizerApp(QMainWindow):
                 white_threshold, black_threshold
             )
 
+            # Process the plist file
+            self.process_plist_file(input_dir, color, intensity, create_new)
+
             # Update history
             self.update_history_list()
 
@@ -872,6 +965,93 @@ class ColorizerApp(QMainWindow):
 
         except Exception as e:
             raise Exception(f"Error processing theme files: {str(e)}")
+
+    def process_plist_file(self, input_dir, color, intensity, create_new):
+        """Process the settings.plist file with color adjustments"""
+        try:
+            if create_new:
+                folder_name = input_dir.name
+                parent_folder = input_dir.parent
+                sanitized_color = color.replace('#','').upper()
+                out_folder = parent_folder / f"{folder_name}-colorized#{sanitized_color}_{intensity:.1f}"
+                plist_path = out_folder / "settings.plist"
+            else:
+                plist_path = input_dir / "settings.plist"
+
+            if not plist_path.exists():
+                print(f"No settings.plist found at {plist_path}")
+                return
+
+            # Load the plist file
+            with open(plist_path, 'rb') as f:
+                plist_data = plistlib.load(f)
+
+            # Get plist settings from UI
+            active_shadow = self.plist_widget.active_shadow_spin.value()
+            inactive_shadow = self.plist_widget.inactive_shadow_spin.value()
+            dock_reflection = self.plist_widget.dock_reflection_checkbox.isChecked()
+            dock_touches_ground = self.plist_widget.dock_touches_ground_checkbox.isChecked()
+            hide_window_rim = self.plist_widget.hide_window_rim_checkbox.isChecked()
+            mini_toolbar = self.plist_widget.mini_toolbar_checkbox.isChecked()
+            patch_appearance = self.plist_widget.patch_appearance_checkbox.isChecked()
+            control_spacing = self.plist_widget.control_spacing_spin.value()
+
+            # Update non-color values
+            if 'gWindowShadowActiveRadius' in plist_data:
+                plist_data['gWindowShadowActiveRadius'] = active_shadow
+            if 'gWindowShadowInactiveRadius' in plist_data:
+                plist_data['gWindowShadowInactiveRadius'] = inactive_shadow
+            if 'gDockReflection' in plist_data:
+                plist_data['gDockReflection'] = dock_reflection
+            if 'gDockTouchesGround' in plist_data:
+                plist_data['gDockTouchesGround'] = dock_touches_ground
+            if 'gHideWindowRim' in plist_data:
+                plist_data['gHideWindowRim'] = hide_window_rim
+            if 'gMiniToolbar' in plist_data:
+                plist_data['gMiniToolbar'] = mini_toolbar
+            if 'gPatchAppearance' in plist_data:
+                plist_data['gPatchAppearance'] = patch_appearance
+            if 'gControlSpacing' in plist_data:
+                plist_data['gControlSpacing'] = control_spacing
+
+            # Update color values if gColors exists
+            if 'gColors' in plist_data:
+                color_dict = plist_data['gColors']
+                r_col, g_col, b_col = hex_to_rgb(color)
+
+                for key, value in color_dict.items():
+                    if isinstance(value, str) and value.startswith('#'):
+                        # Extract original color components
+                        original_hex = value.lstrip('#')
+                        if len(original_hex) == 8:  # RGBA format
+                            r_orig = int(original_hex[0:2], 16)
+                            g_orig = int(original_hex[2:4], 16)
+                            b_orig = int(original_hex[4:6], 16)
+                            a_orig = original_hex[6:8]
+
+                            # Apply color tinting
+                            r_new = round(r_orig*(1-intensity) + r_col*intensity)
+                            g_new = round(g_orig*(1-intensity) + g_col*intensity)
+                            b_new = round(b_orig*(1-intensity) + b_col*intensity)
+
+                            # Clamp values
+                            r_new = max(0, min(255, r_new))
+                            g_new = max(0, min(255, g_new))
+                            b_new = max(0, min(255, b_new))
+
+                            # Create new color value
+                            new_color = f"#{r_new:02x}{g_new:02x}{b_new:02x}{a_orig}"
+                            color_dict[key] = new_color
+
+            # Save the modified plist
+            with open(plist_path, 'wb') as f:
+                plistlib.dump(plist_data, f)
+
+            print(f"Updated settings.plist at {plist_path}")
+
+        except Exception as e:
+            print(f"Error processing plist file: {e}")
+            raise
 
     def restore_backup_files(self, input_dir):
         """Restore backup files"""
